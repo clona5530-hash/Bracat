@@ -1,305 +1,120 @@
 const express = require("express");
-const axios = require("axios");
-const cheerio = require("cheerio");
-
-const { wrapper } =
-require("axios-cookiejar-support");
-
-const tough = require("tough-cookie");
+const { chromium } = require("playwright");
 
 const app = express();
 
-const BASE = "https://aibcr.me";
-
-const LOGIN_URL = `${BASE}/login`;
-const LOBBY_URL = `${BASE}/ae/lobby`;
-const API_URL =
-`${BASE}/baccarat/getnewresult`;
-
-const USERNAME = "bucumh";
-const PASSWORD = "123456";
-
-const jar = new tough.CookieJar();
-
-const client = wrapper(
-    axios.create({
-        jar,
-        withCredentials: true,
-        headers: {
-            "User-Agent":
-            "Mozilla/5.0"
-        },
-        timeout: 15000
-    })
-);
-
 let cache = [];
-let loggedIn = false;
-
-// ======================
-// GET TOKEN
-// ======================
-
-function getToken(html) {
-
-    const $ = cheerio.load(html);
-
-    return (
-        $('input[name="_token"]').val()
-        ||
-        $('meta[name="csrf-token"]')
-        .attr("content")
-        ||
-        ""
-    );
-}
-
-// ======================
-// LOGIN
-// ======================
-
-async function login() {
-
-    try {
-
-        console.log("🔄 Đang login...");
-
-        const page =
-        await client.get(LOGIN_URL);
-
-        const token =
-        getToken(page.data);
-
-        const form =
-        new URLSearchParams({
-            username: USERNAME,
-            password: PASSWORD,
-            action: "Login",
-            _token: token
-        });
-
-        await client.post(
-            LOGIN_URL,
-            form,
-            {
-                headers: {
-                    "Content-Type":
-                    "application/x-www-form-urlencoded"
-                }
-            }
-        );
-
-        await client.get(LOBBY_URL);
-
-        loggedIn = true;
-
-        console.log("✅ Login OK");
-
-    } catch (e) {
-
-        loggedIn = false;
-
-        console.log(
-            "❌ Login lỗi:",
-            e.message
-        );
-    }
-}
-
-// ======================
-// PHÂN TÍCH CẦU
-// ======================
-
-function analyzePattern(result) {
-
-    if (!result)
-        return {
-            prediction: "?",
-            pattern: "Unknown"
-        };
-
-    // BỆT PLAYER
-    if (/P{4,}$/.test(result)) {
-
-        return {
-            prediction: "P",
-            pattern: "Bệt Player"
-        };
-    }
-
-    // BỆT BANKER
-    if (/B{4,}$/.test(result)) {
-
-        return {
-            prediction: "B",
-            pattern: "Bệt Banker"
-        };
-    }
-
-    // CẦU 1-1
-    if (
-        /(PBPB|BPBP)$/
-        .test(result.slice(-4))
-    ) {
-
-        return {
-
-            prediction:
-            result.at(-1) === "P"
-            ? "B"
-            : "P",
-
-            pattern: "Cầu 1-1"
-        };
-    }
-
-    // THỐNG KÊ
-    const p =
-    [...result]
-    .filter(x => x === "P").length;
-
-    const b =
-    [...result]
-    .filter(x => x === "B").length;
-
-    return {
-
-        prediction:
-        p > b ? "P" : "B",
-
-        pattern: "Theo thống kê"
-    };
-}
-
-// ======================
-// FETCH DATA
-// ======================
 
 async function fetchData() {
 
+    const browser =
+    await chromium.launch({
+        headless: true
+    });
+
+    const page =
+    await browser.newPage();
+
     try {
 
-        if (!loggedIn) {
-
-            await login();
-        }
-
-        const res =
-        await client.post(
-            API_URL,
-            new URLSearchParams({
-                gameCode: "ae"
-            }),
+        // LOGIN
+        await page.goto(
+            "https://aibcr.me/login",
             {
-                headers: {
-                    "X-Requested-With":
-                    "XMLHttpRequest",
-
-                    "Content-Type":
-                    "application/x-www-form-urlencoded"
-                }
+                waitUntil:
+                "networkidle"
             }
         );
 
-        const data =
-        res.data?.data || [];
+        await page.fill(
+            'input[name="username"]',
+            'bucumh'
+        );
 
-        cache = data.map(t => {
+        await page.fill(
+            'input[name="password"]',
+            '123456'
+        );
 
-            const ai =
-            analyzePattern(
-                t.result || ""
+        await page.click(
+            'button[type="submit"]'
+        );
+
+        await page.waitForTimeout(3000);
+
+        // LOBBY
+        await page.goto(
+            "https://aibcr.me/ae/lobby",
+            {
+                waitUntil:
+                "networkidle"
+            }
+        );
+
+        // API
+        const result =
+        await page.evaluate(async () => {
+
+            const res =
+            await fetch(
+                "/baccarat/getnewresult",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                        "application/x-www-form-urlencoded",
+
+                        "X-Requested-With":
+                        "XMLHttpRequest"
+                    },
+
+                    body:
+                    "gameCode=ae"
+                }
             );
 
-            return {
-
-                table:
-                t.table_name,
-
-                result:
-                t.result,
-
-                prediction:
-                ai.prediction,
-
-                pattern:
-                ai.pattern,
-
-                goodRoad:
-                t.goodRoad,
-
-                round:
-                t.round,
-
-                shoeId:
-                t.shoeId,
-
-                time:
-                new Date()
-                .toLocaleTimeString()
-            };
+            return await res.json();
         });
 
+        cache =
+        result.data || [];
+
         console.log(
-            `✅ UPDATE ${cache.length} bàn`
+            "✅ UPDATE:",
+            cache.length
         );
 
     } catch (e) {
 
         console.log(
-            "❌ Fetch lỗi:",
+            "❌ ERROR:",
             e.message
         );
-
-        loggedIn = false;
     }
+
+    await browser.close();
 }
 
-// ======================
-// AUTO LOOP
-// ======================
-
-async function start() {
-
-    await login();
-
-    setInterval(async () => {
-
-        await fetchData();
-
-    }, 1000);
-}
-
-// ======================
-// ROUTES
-// ======================
+setInterval(fetchData, 5000);
 
 app.get("/", (req, res) => {
-
-    res.send("🚀 Baccarat API Running");
+    res.send("RUNNING");
 });
 
 app.get("/data", (req, res) => {
-
     res.json(cache);
 });
-
-// ======================
-// START SERVER
-// ======================
 
 const PORT =
 process.env.PORT || 3000;
 
-app.listen(
-    PORT,
-    "0.0.0.0",
-    () => {
+app.listen(PORT, "0.0.0.0", () => {
 
-        console.log(
-            `🚀 SERVER RUNNING PORT ${PORT}`
-        );
+    console.log(
+        "🚀 RUNNING PORT",
+        PORT
+    );
 
-        start();
-    }
-);
+    fetchData();
+});
