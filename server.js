@@ -34,6 +34,11 @@ const client = wrapper(
 );
 
 let cache = [];
+let loggedIn = false;
+
+// ======================
+// GET TOKEN
+// ======================
 
 function getToken(html) {
 
@@ -49,9 +54,15 @@ function getToken(html) {
     );
 }
 
+// ======================
+// LOGIN
+// ======================
+
 async function login() {
 
     try {
+
+        console.log("🔄 Đang login...");
 
         const page =
         await client.get(LOGIN_URL);
@@ -80,9 +91,13 @@ async function login() {
 
         await client.get(LOBBY_URL);
 
+        loggedIn = true;
+
         console.log("✅ Login OK");
 
     } catch (e) {
+
+        loggedIn = false;
 
         console.log(
             "❌ Login lỗi:",
@@ -90,6 +105,10 @@ async function login() {
         );
     }
 }
+
+// ======================
+// PHÂN TÍCH CẦU
+// ======================
 
 function analyzePattern(result) {
 
@@ -99,7 +118,7 @@ function analyzePattern(result) {
             pattern: "Unknown"
         };
 
-    // bệt
+    // BỆT PLAYER
     if (/P{4,}$/.test(result)) {
 
         return {
@@ -108,6 +127,7 @@ function analyzePattern(result) {
         };
     }
 
+    // BỆT BANKER
     if (/B{4,}$/.test(result)) {
 
         return {
@@ -116,13 +136,14 @@ function analyzePattern(result) {
         };
     }
 
-    // 1-1
+    // CẦU 1-1
     if (
         /(PBPB|BPBP)$/
         .test(result.slice(-4))
     ) {
 
         return {
+
             prediction:
             result.at(-1) === "P"
             ? "B"
@@ -132,7 +153,7 @@ function analyzePattern(result) {
         };
     }
 
-    // default
+    // THỐNG KÊ
     const p =
     [...result]
     .filter(x => x === "P").length;
@@ -142,6 +163,7 @@ function analyzePattern(result) {
     .filter(x => x === "B").length;
 
     return {
+
         prediction:
         p > b ? "P" : "B",
 
@@ -149,9 +171,18 @@ function analyzePattern(result) {
     };
 }
 
+// ======================
+// FETCH DATA
+// ======================
+
 async function fetchData() {
 
     try {
+
+        if (!loggedIn) {
+
+            await login();
+        }
 
         const res =
         await client.post(
@@ -181,24 +212,36 @@ async function fetchData() {
             );
 
             return {
-                table: t.table_name,
-                result: t.result,
+
+                table:
+                t.table_name,
+
+                result:
+                t.result,
+
                 prediction:
                 ai.prediction,
+
                 pattern:
                 ai.pattern,
+
                 goodRoad:
                 t.goodRoad,
+
                 round:
                 t.round,
+
                 shoeId:
-                t.shoeId
+                t.shoeId,
+
+                time:
+                new Date()
+                .toLocaleTimeString()
             };
         });
 
         console.log(
-            "✅ UPDATE:",
-            cache.length
+            `✅ UPDATE ${cache.length} bàn`
         );
 
     } catch (e) {
@@ -207,8 +250,14 @@ async function fetchData() {
             "❌ Fetch lỗi:",
             e.message
         );
+
+        loggedIn = false;
     }
 }
+
+// ======================
+// AUTO LOOP
+// ======================
 
 async function start() {
 
@@ -221,16 +270,36 @@ async function start() {
     }, 1000);
 }
 
+// ======================
+// ROUTES
+// ======================
+
+app.get("/", (req, res) => {
+
+    res.send("🚀 Baccarat API Running");
+});
+
 app.get("/data", (req, res) => {
 
     res.json(cache);
 });
 
-app.listen(3000, () => {
+// ======================
+// START SERVER
+// ======================
 
-    console.log(
-        "🚀 http://localhost:3000/data"
-    );
+const PORT =
+process.env.PORT || 3000;
 
-    start();
-});
+app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+
+        console.log(
+            `🚀 SERVER RUNNING PORT ${PORT}`
+        );
+
+        start();
+    }
+);
