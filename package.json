@@ -1,6 +1,7 @@
 {
   "name": "baccarat-api",
   "version": "1.0.0",
+  "description": "Baccarat API using Express + Playwright",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
